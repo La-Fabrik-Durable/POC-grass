@@ -93,6 +93,8 @@ function getGreenIntensity(imageData: ImageData, u: number, v: number): number {
 // Props interface for reusable component
 export interface GrassProps {
   terrainMesh: THREE.Mesh           // The terrain mesh to place grass on
+  terrainScale?: THREE.Vector3      // The scale of the terrain mesh
+  terrainSize?: THREE.Vector3      // The geometry size (bounding box) of the terrain
   position?: [number, number, number] // Position in 3D space
   scale?: number                     // Overall scale of grass instances
   count?: number                     // Maximum number of grass instances
@@ -109,6 +111,7 @@ export interface GrassProps {
   useTextureDensity?: boolean        // Use terrain texture for density
   greenThreshold?: number            // Minimum green value for placement
   densityMultiplier?: number         // Multiplier for texture-based density
+  showDebugTerrain?: boolean         // Show debug terrain wireframe
 }
 
 // Uniforms type - data passed to shaders
@@ -129,6 +132,8 @@ export type GrassUniforms = {
 
 export function Grass({
   terrainMesh,
+  terrainScale,
+  terrainSize,
   position = [0, 0, 0],
   scale = 1,
   count = 8000,
@@ -144,7 +149,8 @@ export function Grass({
   lightIntensity = 1,
   useTextureDensity = false,
   greenThreshold = 0.3,
-  densityMultiplier = 2.0
+  densityMultiplier = 2.0,
+  showDebugTerrain = false
 }: GrassProps) {
   // Refs for accessing mesh and geometry
   const instancedMeshRef = useRef<THREE.InstancedMesh>(null)
@@ -274,6 +280,8 @@ export function Grass({
     if (!grassGeometryRef.current || !terrainMesh.geometry) return
 
     console.log('Creating grass instances with geometry:', grassGeometryRef.current)
+    console.log('Terrain scale:', terrainScale)
+    console.log('Terrain geometry size:', terrainSize)
 
     // Analyze terrain texture for density-based placement if enabled
     // This allows grass to grow more densely in greener (more suitable) areas
@@ -395,7 +403,7 @@ export function Grass({
     return () => {
       mesh.dispose()
     }
-  }, [terrainMesh, grassMaterial, count, scale, grassGeometryRef.current, useTextureDensity, greenThreshold, densityMultiplier])
+  }, [terrainMesh, grassMaterial, count, scale, grassGeometryRef.current, useTextureDensity, greenThreshold, densityMultiplier, terrainScale?.x])
 
   // Animation frame update
   useFrame((state) => {
@@ -404,15 +412,35 @@ export function Grass({
     }
   })
 
-  if (!instancedMesh) return null
+  if (!instancedMesh && !showDebugTerrain) return null
+
+  // Debug terrain mesh to visualize spawn area
+  const debugTerrainMesh = showDebugTerrain && terrainMesh ? (
+    <mesh
+      geometry={terrainMesh.geometry.clone()}
+      material={new THREE.MeshBasicMaterial({
+        color: 'red',
+        wireframe: true,
+        transparent: true,
+        opacity: 0.3
+      })}
+      scale={terrainScale || new THREE.Vector3(1, 1, 1)}
+      position={position}
+    />
+  ) : null
 
   return (
-    <primitive 
-      object={instancedMesh} 
-      ref={instancedMeshRef}
-      position={position}
-      castShadow
-      receiveShadow
-    />
+    <>
+      {debugTerrainMesh}
+      {instancedMesh && (
+        <primitive 
+          object={instancedMesh} 
+          ref={instancedMeshRef}
+          position={position}
+          castShadow
+          receiveShadow
+        />
+      )}
+    </>
   )
 }

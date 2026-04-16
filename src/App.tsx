@@ -13,7 +13,7 @@ function Loading() {
 }
 
 // Composant pour charger le terrain
-function Terrain({ onTerrainLoaded }: { onTerrainLoaded: (mesh: THREE.Mesh) => void }) {
+function Terrain({ onTerrainLoaded }: { onTerrainLoaded: (mesh: THREE.Mesh, scale: THREE.Vector3, geometrySize: THREE.Vector3) => void }) {
   const { scene } = useGLTF('/island.glb')
   const hasLoaded = useRef(false)
   
@@ -23,7 +23,7 @@ function Terrain({ onTerrainLoaded }: { onTerrainLoaded: (mesh: THREE.Mesh) => v
     
     scene.traverse((child) => {
       if (child instanceof THREE.Mesh) {
-        child.scale.set(0.5, 1, 1)
+        child.scale.set(2, 1, 1)
         
         // Garder le matériau original du GLTF au lieu de le remplacer
         if (child.material) {
@@ -39,7 +39,17 @@ function Terrain({ onTerrainLoaded }: { onTerrainLoaded: (mesh: THREE.Mesh) => v
         
         child.receiveShadow = true
         console.log('Terrain loaded:', child)
-        onTerrainLoaded(child)
+        
+        // Pass both mesh, its scale, and geometry size
+        const terrainScale = new THREE.Vector3()
+        child.getWorldScale(terrainScale)
+        
+        // Calculate geometry size (bounding box)
+        const geometrySize = new THREE.Vector3()
+        child.geometry.computeBoundingBox()
+        child.geometry.boundingBox?.getSize(geometrySize)
+        
+        onTerrainLoaded(child, terrainScale, geometrySize)
       }
     })
   }, [scene, onTerrainLoaded])
@@ -165,6 +175,15 @@ function ControlPanel({
           Show Second Grass Patch
         </label>
         
+        <label style={{ display: 'block', marginBottom: '15px' }}>
+          <input 
+            type="checkbox"
+            checked={grassProps.showDebugTerrain}
+            onChange={(e) => setGrassProps({...grassProps, showDebugTerrain: e.target.checked})}
+          />
+          Show Debug Terrain (Red Wireframe)
+        </label>
+        
         <div style={{ marginTop: '15px', fontSize: '0.9em', color: '#aaa' }}>
           <strong>Controls:</strong>
           <ul style={{ marginTop: '5px', paddingLeft: '20px' }}>
@@ -179,7 +198,7 @@ function ControlPanel({
 }
 
 export default function App() {
-  const [terrainMesh, setTerrainMesh] = useState<THREE.Mesh | null>(null)
+  const [terrainData, setTerrainData] = useState<{ mesh: THREE.Mesh; scale: THREE.Vector3; geometrySize: THREE.Vector3 } | null>(null)
   const [showSecondGrass, setShowSecondGrass] = useState(false)
   const [grassProps, setGrassProps] = useState({
     baseColor: '#a8ff1d',
@@ -188,11 +207,16 @@ export default function App() {
     windStrength: 0.1,
     enableShadows: true,
     scale: 1, // Scale factor for grass instances
-    count: 300,
+    count: 8000,
     useTextureDensity: false,
     greenThreshold: 0.3,
-    densityMultiplier: 1.0
+    densityMultiplier: 1.0,
+    showDebugTerrain: false
   })
+
+  const handleTerrainLoaded = (mesh: THREE.Mesh, scale: THREE.Vector3, geometrySize: THREE.Vector3) => {
+    setTerrainData({ mesh, scale, geometrySize })
+  }
 
   return (
     <>
@@ -250,13 +274,14 @@ export default function App() {
         </mesh> */}
         
         <Suspense fallback={<Loading />}>
-          <Terrain onTerrainLoaded={setTerrainMesh} />
+          <Terrain onTerrainLoaded={handleTerrainLoaded} />
           
-          {terrainMesh ? (
+          {terrainData ? (
             <>
               {/* Premier patch d'herbe - version avec densité basée sur texture */}
               <Grass
-                terrainMesh={terrainMesh}
+                terrainMesh={terrainData.mesh}
+                terrainScale={terrainData.scale}
                 position={[0, 0, 0]}
                 scale={grassProps.scale}
                 count={grassProps.count}
@@ -273,12 +298,14 @@ export default function App() {
                 useTextureDensity={grassProps.useTextureDensity}
                 greenThreshold={grassProps.greenThreshold}
                 densityMultiplier={grassProps.densityMultiplier}
+                showDebugTerrain={grassProps.showDebugTerrain}
               />
               
               {/* Deuxième patch d'herbe - version avec couleurs différentes */}
               {showSecondGrass && (
                 <Grass
-                  terrainMesh={terrainMesh}
+                  terrainMesh={terrainData.mesh}
+                  terrainScale={terrainData.scale}
                   position={[15, 0, -10]}
                   scale={grassProps.scale * 0.8}
                   count={3000}
