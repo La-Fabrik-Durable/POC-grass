@@ -23,7 +23,7 @@ function Terrain({ onTerrainLoaded }: { onTerrainLoaded: (mesh: THREE.Mesh, scal
     
     scene.traverse((child) => {
       if (child instanceof THREE.Mesh) {
-        child.scale.set(2, 1, 1)
+        child.scale.set(5,5,5)
         
         // Garder le matériau original du GLTF au lieu de le remplacer
         if (child.material) {
@@ -219,7 +219,7 @@ export default function App() {
     windStrength: 0.1,
     enableShadows: true,
     scale: 1, // Scale factor for grass instances
-    count: 8000,
+    count: 300,
     useTextureDensity: false,
     greenThreshold: 0.3,
     densityMultiplier: 1.0,

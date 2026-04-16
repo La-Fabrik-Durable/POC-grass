@@ -291,9 +291,18 @@ export function Grass({
       console.log('Texture analysis:', textureData ? 'Success' : 'Failed')
     }
 
+    // Clone geometry and apply scale to ensure sampler covers entire scaled terrain
+    const scaledGeometry = terrainMesh.geometry.clone()
+    if (terrainScale) {
+      scaledGeometry.scale(terrainScale.x, terrainScale.y, terrainScale.z)
+    }
+    
+    // Create a temporary mesh for the sampler with scaled geometry
+    const scaledTerrainMesh = new THREE.Mesh(scaledGeometry, terrainMesh.material)
+    
     // Create surface sampler to sample positions on terrain mesh
     // This ensures grass grows on terrain surface, not floating in air
-    const sampler = new MeshSurfaceSampler(terrainMesh).build()
+    const sampler = new MeshSurfaceSampler(scaledTerrainMesh).build()
     
     // Storage for valid positions that pass density/placement tests
     const validPositions: Array<{
