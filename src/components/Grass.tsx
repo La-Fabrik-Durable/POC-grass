@@ -365,6 +365,15 @@ export function Grass({
     
     console.log(`Placed ${finalCount} grass instances (${useTextureDensity ? 'texture-based' : 'uniform'})`)
     
+    // Log first few positions to debug
+    if (validPositions.length > 0) {
+      console.log('First 3 grass positions:', validPositions.slice(0, 3).map(p => ({
+        x: p.position.x.toFixed(2),
+        y: p.position.y.toFixed(2),
+        z: p.position.z.toFixed(2)
+      })))
+    }
+    
     // Place each instance with proper position, rotation, and scale
     const quaternion = new THREE.Quaternion()
     const scaleVec = new THREE.Vector3(scale, scale, scale)

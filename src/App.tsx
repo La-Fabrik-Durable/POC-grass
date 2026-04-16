@@ -49,6 +49,18 @@ function Terrain({ onTerrainLoaded }: { onTerrainLoaded: (mesh: THREE.Mesh, scal
         child.geometry.computeBoundingBox()
         child.geometry.boundingBox?.getSize(geometrySize)
         
+        // Get world position (center of terrain)
+        const worldPosition = new THREE.Vector3()
+        child.getWorldPosition(worldPosition)
+        
+        console.log('Terrain world position:', worldPosition)
+        console.log('Terrain world bounds:', {
+          minX: worldPosition.x - geometrySize.x * child.scale.x / 2,
+          maxX: worldPosition.x + geometrySize.x * child.scale.x / 2,
+          minZ: worldPosition.z - geometrySize.z * child.scale.z / 2,
+          maxZ: worldPosition.z + geometrySize.z * child.scale.z / 2
+        })
+        
         onTerrainLoaded(child, terrainScale, geometrySize)
       }
     })
@@ -282,6 +294,7 @@ export default function App() {
               <Grass
                 terrainMesh={terrainData.mesh}
                 terrainScale={terrainData.scale}
+                terrainSize={terrainData.geometrySize}
                 position={[0, 0, 0]}
                 scale={grassProps.scale}
                 count={grassProps.count}
