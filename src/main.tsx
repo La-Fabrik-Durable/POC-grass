@@ -7,7 +7,7 @@ import { DebugPerf } from './components/Debug_Perf.tsx'
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <App />
-    <DebugPerf></DebugPerf>
+    <DebugPerf/>
   </React.StrictMode>,
 )
 

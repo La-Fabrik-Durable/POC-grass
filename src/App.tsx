@@ -188,7 +188,7 @@ export default function App() {
     windStrength: 0.1,
     enableShadows: true,
     scale: 1,
-    count: 5000,
+    count: 300,
     useTextureDensity: false,
     greenThreshold: 0.3,
     densityMultiplier: 2.0
@@ -244,10 +244,10 @@ export default function App() {
         />
         
         {/* Ground reference - à remover une fois le terrainOK */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.5, 0]} receiveShadow>
+        {/* <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.5, 0]} receiveShadow>
           <planeGeometry args={[50, 50]} />
           <meshStandardMaterial color="#3d5c3d" />
-        </mesh>
+        </mesh> */}
         
         <Suspense fallback={<Loading />}>
           <Terrain onTerrainLoaded={setTerrainMesh} />
