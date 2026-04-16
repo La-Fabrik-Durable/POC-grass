@@ -23,7 +23,7 @@ function Terrain({ onTerrainLoaded }: { onTerrainLoaded: (mesh: THREE.Mesh) => v
     
     scene.traverse((child) => {
       if (child instanceof THREE.Mesh) {
-        child.geometry.scale(0.5, 1, 1)
+        child.scale.set(0.5, 1, 1)
         
         // Garder le matériau original du GLTF au lieu de le remplacer
         if (child.material) {
