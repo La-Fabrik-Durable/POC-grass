@@ -332,8 +332,14 @@ export function Grass({
         
         // Convert world position to UV coordinates (0-1 range)
         const u = (tempPosition.x / actualTerrainSizeX) + 0.5
-        const v = (tempPosition.z / actualTerrainSizeZ) + 0.5
-           
+        // const v = (tempPosition.z / actualTerrainSizeZ) + 0.5
+        
+        // Convert world position to UV coordinates (0-1 range) with offset
+        // const uRaw = (tempPosition.x / actualTerrainSizeX) + 0.5
+        const vRaw = (tempPosition.z / actualTerrainSizeZ) + 0.5
+        
+        const v = 1 - vRaw
+
         // Get grayscale intensity from texture at this position
         greenIntensity = getTextureIntensity(textureData, u, v)
         
