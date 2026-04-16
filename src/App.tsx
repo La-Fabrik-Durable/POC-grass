@@ -23,7 +23,7 @@ function Terrain({ onTerrainLoaded }: { onTerrainLoaded: (mesh: THREE.Mesh) => v
     
     scene.traverse((child) => {
       if (child instanceof THREE.Mesh) {
-        child.geometry.scale(3, 3, 3)
+        child.geometry.scale(0.5, 1, 1)
         
         // Garder le matériau original du GLTF au lieu de le remplacer
         if (child.material) {
@@ -182,16 +182,16 @@ export default function App() {
   const [terrainMesh, setTerrainMesh] = useState<THREE.Mesh | null>(null)
   const [showSecondGrass, setShowSecondGrass] = useState(false)
   const [grassProps, setGrassProps] = useState({
-    baseColor: '#313f1b',
+    baseColor: '#a8ff1d',
     tipColor1: '#9bd38d',
     tipColor2: '#1f352a',
     windStrength: 0.1,
     enableShadows: true,
-    scale: 1,
+    scale: 1, // Scale factor for grass instances
     count: 300,
     useTextureDensity: false,
     greenThreshold: 0.3,
-    densityMultiplier: 2.0
+    densityMultiplier: 1.0
   })
 
   return (

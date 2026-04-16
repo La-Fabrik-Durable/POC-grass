@@ -1,20 +1,37 @@
+/**
+ * Grass Component - A sophisticated grass instancing system for React Three Fiber
+ * 
+ * This component creates realistic grass rendering on terrain surfaces using:
+ * - Texture-based density sampling
+ * - Wind animation effects
+ * - Shadow support
+ * - Smart position sampling to avoid clipping
+ */
 import { useRef, useMemo, useEffect, useState } from 'react'
 import { useFrame, extend } from '@react-three/fiber'
 import { useGLTF, useTexture } from '@react-three/drei'
 import * as THREE from 'three'
 import { MeshSurfaceSampler } from 'three-stdlib'
 
+// Register MeshSurfaceSampler as an extendable component for @react-three/fiber
 extend({ MeshSurfaceSampler })
 
-// Cache for texture analysis (performance)
+// Cache for texture analysis (performance optimization - avoid re-analyzing same texture)
 const textureAnalysisCache = new Map<string, ImageData>()
 
-// Analyze terrain texture to get color data
+/**
+ * Analyze terrain texture to extract color data for grass placement decisions
+ * This allows grass to grow more densely in greener areas of the terrain texture
+ * 
+ * @param terrainMesh - The terrain mesh whose texture we want to analyze
+ * @returns ImageData with pixel data or null if analysis fails
+ */
 function analyzeTerrainTexture(terrainMesh: THREE.Mesh): ImageData | null {
   if (!terrainMesh.material) return null
   
   let texture: THREE.Texture | null = null
   
+  // Check if material supports texture mapping
   if (terrainMesh.material instanceof THREE.MeshStandardMaterial || 
       terrainMesh.material instanceof THREE.MeshPhongMaterial ||
       terrainMesh.material instanceof THREE.MeshLambertMaterial) {
@@ -25,6 +42,7 @@ function analyzeTerrainTexture(terrainMesh: THREE.Mesh): ImageData | null {
   
   const cacheKey = texture.uuid
   
+  // Return cached analysis if available (performance)
   if (textureAnalysisCache.has(cacheKey)) {
     console.log('Using cached texture analysis')
     return textureAnalysisCache.get(cacheKey)!
@@ -35,6 +53,7 @@ function analyzeTerrainTexture(terrainMesh: THREE.Mesh): ImageData | null {
   const image = texture.image as HTMLImageElement | HTMLCanvasElement
   if (!image || !('width' in image) || !('height' in image)) return null
   
+  // Create off-screen canvas to analyze pixel data
   const canvas = document.createElement('canvas')
   const ctx = canvas.getContext('2d')
   if (!ctx) return null
@@ -43,6 +62,7 @@ function analyzeTerrainTexture(terrainMesh: THREE.Mesh): ImageData | null {
   canvas.height = image.height
   ctx.drawImage(image, 0, 0)
   
+  // Extract pixel data for texture analysis
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
   textureAnalysisCache.set(cacheKey, imageData)
   
@@ -50,55 +70,61 @@ function analyzeTerrainTexture(terrainMesh: THREE.Mesh): ImageData | null {
 }
 
 // Calculate green intensity at UV coordinates
+// This determines how "grass-like" a terrain pixel is based on its color values
+// Higher green intensity means more suitable for grass growth
 function getGreenIntensity(imageData: ImageData, u: number, v: number): number {
+  // Convert UV coordinates (0-1 range) to pixel coordinates
   const x = Math.floor(u * imageData.width)
-  const y = Math.floor((1 - v) * imageData.height)
-  const index = (y * imageData.width + x) * 4
+  const y = Math.floor((1 - v) * imageData.height) // Flip Y because image coordinates differ from UV
+  const index = (y * imageData.width + x) * 4 // RGBA has 4 values per pixel
   
   if (index >= imageData.data.length) return 0
   
+  // Normalize RGB values to 0-1 range
   const r = imageData.data[index] / 255
   const g = imageData.data[index + 1] / 255
   const b = imageData.data[index + 2] / 255
   
+  // Calculate green intensity: prioritize green over red/blue
+  // Subtract a weighted version of the max of red/blue to emphasize green
   return Math.max(0, g - Math.max(r, b) * 0.8)
 }
 
 // Props interface for reusable component
 export interface GrassProps {
-  terrainMesh: THREE.Mesh
-  position?: [number, number, number]
-  scale?: number
-  count?: number
-  baseColor?: string
-  tipColor1?: string
-  tipColor2?: string
-  enableWind?: boolean
-  enableShadows?: boolean
-  windSpeed?: number
-  windStrength?: number
-  noiseScale?: number
-  shadowDarkness?: number
-  lightIntensity?: number
-  useTextureDensity?: boolean
-  greenThreshold?: number
-  densityMultiplier?: number
+  terrainMesh: THREE.Mesh           // The terrain mesh to place grass on
+  position?: [number, number, number] // Position in 3D space
+  scale?: number                     // Overall scale of grass instances
+  count?: number                     // Maximum number of grass instances
+  baseColor?: string                 // Base color of grass (diffuse)
+  tipColor1?: string                 // Tip color gradient stop 1
+  tipColor2?: string                 // Tip color gradient stop 2
+  enableWind?: boolean               // Enable wind animation
+  enableShadows?: boolean            // Enable shadow receiving/casting
+  windSpeed?: number                 // Speed of wind animation
+  windStrength?: number              // Strength of wind bending
+  noiseScale?: number                // Scale of noise texture
+  shadowDarkness?: number            // Darkness of shadows
+  lightIntensity?: number            // Intensity of lighting
+  useTextureDensity?: boolean        // Use terrain texture for density
+  greenThreshold?: number            // Minimum green value for placement
+  densityMultiplier?: number         // Multiplier for texture-based density
 }
 
-// Uniforms type
-type GrassUniforms = {
-  uTime: { value: number }
-  uEnableShadows: { value: number }
-  uShadowDarkness: { value: number }
-  uGrassLightIntensity: { value: number }
-  uNoiseScale: { value: number }
-  uWindSpeed: { value: number }
-  uWindStrength: { value: number }
-  baseColor: { value: THREE.Color }
-  tipColor1: { value: THREE.Color }
-  tipColor2: { value: THREE.Color }
-  noiseTexture: { value: THREE.Texture | null }
-  grassAlphaTexture: { value: THREE.Texture | null }
+// Uniforms type - data passed to shaders
+export type GrassUniforms = {
+  uTime: { value: number }                     // Time for animation
+  uEnableShadows: { value: number }            // Shadow enable flag (0 or 1)
+  uShadowDarkness: { value: number }           // Shadow darkness factor
+  uGrassLightIntensity: { value: number }      // Light intensity multiplier
+  uNoiseScale: { value: number }               // Noise texture scale
+  uWindSpeed: { value: number }                // Wind animation speed
+  uWindStrength: { value: number }             // Wind bending strength
+  baseColor: { value: THREE.Color }            // Base color uniform
+  tipColor1: { value: THREE.Color }            // Tip color uniform
+  tipColor2: { value: THREE.Color }            // Base color uniform
+  noiseTexture: { value: THREE.Texture | null }      // Noise texture for randomness
+  grassAlphaTexture: { value: THREE.Texture | null } // Alpha texture for grass shape
 }
 
 export function Grass({
@@ -120,8 +146,11 @@ export function Grass({
   greenThreshold = 0.3,
   densityMultiplier = 2.0
 }: GrassProps) {
+  // Refs for accessing mesh and geometry
   const instancedMeshRef = useRef<THREE.InstancedMesh>(null)
   const grassGeometryRef = useRef<THREE.BufferGeometry>(null)
+  
+  // Store uniforms for shader communication
   const uniformsRef = useRef<GrassUniforms>({
     uTime: { value: 0 },
     uEnableShadows: { value: enableShadows ? 1 : 0 },
@@ -136,59 +165,64 @@ export function Grass({
     noiseTexture: { value: null },
     grassAlphaTexture: { value: null }
   })
-
-  // Load textures
+ 
+  // Load procedural textures (noise and grass alpha mask)
   const [noiseTexture, grassAlphaTexture] = useTexture([
-    '/perlinnoise.webp',
-    '/grass.jpeg'
+    '/perlinnoise.webp',    // Noise for organic variation
+    '/grass.jpeg'           // Alpha mask for grass silhouette
   ]) as [THREE.Texture, THREE.Texture]
 
-  // Configure textures
+  // Configure texture properties for proper wrapping
   useEffect(() => {
     noiseTexture.wrapS = noiseTexture.wrapT = THREE.RepeatWrapping
     uniformsRef.current.noiseTexture.value = noiseTexture
     uniformsRef.current.grassAlphaTexture.value = grassAlphaTexture
   }, [noiseTexture, grassAlphaTexture])
 
-  // Load grass model
+  // Load grass model from GLTF asset
   const { scene: grassScene } = useGLTF('/grassLODs.glb')
   
-  // Find grass geometry in model
+  // Find and configure grass geometry in the loaded model
   useEffect(() => {
     let foundGeometry = false
     grassScene.traverse((child) => {
       if (child instanceof THREE.Mesh && !foundGeometry) {
         console.log('Found grass mesh:', child.name)
         const geometry = child.geometry.clone()
-        geometry.scale(5, 5, 5)
+        geometry.scale(1,1,1) // Scale up the grass geometry
         grassGeometryRef.current = geometry
         foundGeometry = true
       }
     })
     
+    // Fallback if no grass geometry found in model
     if (!foundGeometry) {
       console.warn('No grass geometry found in GLTF, using fallback')
       const fallbackGeometry = new THREE.ConeGeometry(0.1, 1, 3)
-      fallbackGeometry.translate(0, 0.5, 0)
+      fallbackGeometry.translate(0, 0.5, 0) // Position at center
       grassGeometryRef.current = fallbackGeometry
     }
   }, [grassScene])
 
-  // Create shader material
+  // Create custom shader material for grass
   const grassMaterial = useMemo(() => {
+    // Use MeshLambertMaterial for good balance of performance and lighting
     const material = new THREE.MeshLambertMaterial({
-      side: THREE.DoubleSide,
-      transparent: true,
-      alphaTest: 0.1,
-      color: baseColor
+      side: THREE.DoubleSide,      // Render both sides of geometry
+      transparent: false,            // Enable transparency
+      alphaTest: 0.1,              // Discard transparent pixels
+      color: baseColor             // Base color
     })
 
+    // Modify shader before compilation to add custom uniforms and behaviors
     material.onBeforeCompile = (shader) => {
+      // Inject custom uniforms into shader
       shader.uniforms = {
         ...shader.uniforms,
         ...uniformsRef.current
       }
 
+      // Add time and wind strength uniforms to vertex shader
       shader.vertexShader = shader.vertexShader.replace(
         '#include <common>',
         `#include <common>
@@ -196,14 +230,18 @@ export function Grass({
         uniform float uWindStrength;`
       )
 
+      // Add wind animation effect to vertex shader
+      // Wind affects X position based on time, position, and UV coordinate
       shader.vertexShader = shader.vertexShader.replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
         
+        // Calculate wind effect: stronger at top of grass (UV.y near 0)
         float windEffect = sin(uTime + position.x * 0.1 + position.z * 0.1) * uWindStrength * (1.0 - uv.y);
         transformed.x += windEffect;`
       )
 
+      // Keep original fragment shader behavior
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <color_fragment>',
         `#include <color_fragment>
@@ -212,9 +250,9 @@ export function Grass({
     }
 
     return material
-  }, [baseColor])
+  }, [baseColor]) // Recreate when baseColor changes
 
-  // Update uniforms with props
+  // Update uniforms when props change
   useEffect(() => {
     uniformsRef.current.uEnableShadows.value = enableShadows ? 1 : 0
     uniformsRef.current.baseColor.value.set(baseColor)
@@ -227,57 +265,68 @@ export function Grass({
     uniformsRef.current.uWindStrength.value = windStrength
   }, [baseColor, tipColor1, tipColor2, enableShadows, noiseScale, shadowDarkness, lightIntensity, windSpeed, windStrength])
 
-  // Create InstancedMesh with sampling on terrain
+  // Create InstancedMesh with sampling on terrain surface
   const [instancedMesh, setInstancedMesh] = useState<THREE.InstancedMesh | null>(null)
 
-  // Create InstancedMesh when everything is ready
+  // Main effect for creating grass instances when dependencies change
   useEffect(() => {
+    // Validate required geometry
     if (!grassGeometryRef.current || !terrainMesh.geometry) return
 
     console.log('Creating grass instances with geometry:', grassGeometryRef.current)
 
-    // Analyze texture if needed
+    // Analyze terrain texture for density-based placement if enabled
+    // This allows grass to grow more densely in greener (more suitable) areas
     let textureData: ImageData | null = null
     if (useTextureDensity) {
       textureData = analyzeTerrainTexture(terrainMesh)
       console.log('Texture analysis:', textureData ? 'Success' : 'Failed')
     }
 
-    // Create sampler
+    // Create surface sampler to sample positions on terrain mesh
+    // This ensures grass grows on terrain surface, not floating in air
     const sampler = new MeshSurfaceSampler(terrainMesh).build()
     
-    // Variables for smart sampling
+    // Storage for valid positions that pass density/placement tests
     const validPositions: Array<{
-      position: THREE.Vector3
-      normal: THREE.Vector3
-      greenIntensity: number
+      position: THREE.Vector3    // World position on terrain
+      normal: THREE.Vector3      // Surface normal for orientation
+      greenIntensity: number     // Suitability score (0-1) for grass growth
     }> = []
     
-    // First pass: collect valid positions
+    // Attempt to sample positions multiple times for better coverage
+    // More attempts = more candidates to choose from
     const maxAttempts = count * 3
     const tempPosition = new THREE.Vector3()
     const tempNormal = new THREE.Vector3()
     
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      // Sample random position and normal on terrain surface
       sampler.sample(tempPosition, tempNormal)
       
       let shouldPlace = true
       let greenIntensity = 1.0
       
+      // If using texture-based density, check if position is suitable
       if (useTextureDensity && textureData) {
-        const terrainSize = 50
+        const terrainSize = 500  // Assumed terrain size
+        // Convert world position to UV coordinates (0-1 range)
         const u = (tempPosition.x / terrainSize) + 0.5
         const v = (tempPosition.z / terrainSize) + 0.5
-          
+           
+        // Get green intensity from texture at this position
         greenIntensity = getGreenIntensity(textureData, u, v)
         
+        // Calculate probability of placing grass based on green intensity
+        // Higher green = higher probability, with density multiplier
         const placeProbability = greenIntensity > greenThreshold ? 
           greenIntensity * densityMultiplier : 
-          0.1
+          0.1  // Low probability for non-green areas
           
         shouldPlace = Math.random() < placeProbability
       }
       
+      // Accept this position if it passes the placement test
       if (shouldPlace) {
         validPositions.push({
           position: tempPosition.clone(),
@@ -285,16 +334,18 @@ export function Grass({
           greenIntensity
         })
         
+        // Stop once we have enough valid positions
         if (validPositions.length >= count) break
       }
     }
     
-    // Sort by green intensity
+    // Sort positions by green intensity (highest first) when using texture
+    // This prioritizes placing grass in most suitable areas
     if (useTextureDensity) {
       validPositions.sort((a, b) => b.greenIntensity - a.greenIntensity)
     }
     
-    // Create instanced mesh
+    // Create actual instanced mesh with the selected positions
     const finalCount = Math.min(validPositions.length, count)
     const mesh = new THREE.InstancedMesh(
       grassGeometryRef.current,
@@ -306,7 +357,7 @@ export function Grass({
     
     console.log(`Placed ${finalCount} grass instances (${useTextureDensity ? 'texture-based' : 'uniform'})`)
     
-    // Place instances
+    // Place each instance with proper position, rotation, and scale
     const quaternion = new THREE.Quaternion()
     const scaleVec = new THREE.Vector3(scale, scale, scale)
     const matrix = new THREE.Matrix4()
@@ -315,24 +366,32 @@ export function Grass({
     for (let i = 0; i < finalCount; i++) {
       const { position, normal, greenIntensity } = validPositions[i]
       
+      // Orient grass blade to be perpendicular to terrain surface
+      // This makes grass follow terrain contours naturally
       quaternion.setFromUnitVectors(yAxis, normal)
       
+      // Add random rotation for natural, non-uniform appearance
       const randomRotation = new THREE.Euler(0, Math.random() * Math.PI * 2, 0)
       const randomQuaternion = new THREE.Quaternion().setFromEuler(randomRotation)
       quaternion.multiply(randomQuaternion)
       
+      // Scale grass based on green intensity when using texture density
+      // Greener areas get slightly larger grass for visual variety
       const variantScale = useTextureDensity ? 
         scale * (0.8 + greenIntensity * 0.4) : 
         scale
       scaleVec.setScalar(variantScale)
       
+      // Combine position, rotation, and scale into transformation matrix
       matrix.compose(position, quaternion, scaleVec)
       mesh.setMatrixAt(i, matrix)
     }
     
+    // Mark instance matrices as updated for rendering
     mesh.instanceMatrix.needsUpdate = true
     setInstancedMesh(mesh)
     
+    // Cleanup: dispose geometry when component unmounts
     return () => {
       mesh.dispose()
     }
