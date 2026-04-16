@@ -69,10 +69,10 @@ function analyzeTerrainTexture(terrainMesh: THREE.Mesh): ImageData | null {
   return imageData
 }
 
-// Calculate green intensity at UV coordinates
-// This determines how "grass-like" a terrain pixel is based on its color values
-// Higher green intensity means more suitable for grass growth
-function getGreenIntensity(imageData: ImageData, u: number, v: number): number {
+// Calculate grayscale intensity at UV coordinates
+// Used for texture-based density: black = no grass, white = max grass
+// Higher value = more grass probability
+function getTextureIntensity(imageData: ImageData, u: number, v: number): number {
   // Convert UV coordinates (0-1 range) to pixel coordinates
   const x = Math.floor(u * imageData.width)
   const y = Math.floor((1 - v) * imageData.height) // Flip Y because image coordinates differ from UV
@@ -85,9 +85,9 @@ function getGreenIntensity(imageData: ImageData, u: number, v: number): number {
   const g = imageData.data[index + 1] / 255
   const b = imageData.data[index + 2] / 255
   
-  // Calculate green intensity: prioritize green over red/blue
-  // Subtract a weighted version of the max of red/blue to emphasize green
-  return Math.max(0, g - Math.max(r, b) * 0.8)
+  // Calculate grayscale intensity (average of RGB)
+  // For grayscale texture, r = g = b, so this works correctly
+  return (r + g + b) / 3
 }
 
 // Props interface for reusable component
@@ -326,19 +326,22 @@ export function Grass({
       
       // If using texture-based density, check if position is suitable
       if (useTextureDensity && textureData) {
-        const terrainSize = 500  // Assumed terrain size
-        // Convert world position to UV coordinates (0-1 range)
-        const u = (tempPosition.x / terrainSize) + 0.5
-        const v = (tempPosition.z / terrainSize) + 0.5
-           
-        // Get green intensity from texture at this position
-        greenIntensity = getGreenIntensity(textureData, u, v)
+        // Calculate actual terrain size based on geometry size × scale
+        const actualTerrainSizeX = (terrainSize?.x || 2) * (terrainScale?.x || 1)
+        const actualTerrainSizeZ = (terrainSize?.z || 2) * (terrainScale?.z || 1)
         
-        // Calculate probability of placing grass based on green intensity
-        // Higher green = higher probability, with density multiplier
+        // Convert world position to UV coordinates (0-1 range)
+        const u = (tempPosition.x / actualTerrainSizeX) + 0.5
+        const v = (tempPosition.z / actualTerrainSizeZ) + 0.5
+           
+        // Get grayscale intensity from texture at this position
+        greenIntensity = getTextureIntensity(textureData, u, v)
+        
+        // Calculate probability of placing grass based on grayscale intensity
+        // White (1.0) = max probability, black (0.0) = no grass
         const placeProbability = greenIntensity > greenThreshold ? 
           greenIntensity * densityMultiplier : 
-          0.1  // Low probability for non-green areas
+          0 //0.1  // Low probability for dark areas
           
         shouldPlace = Math.random() < placeProbability
       }
