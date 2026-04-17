@@ -13,7 +13,7 @@ function Loading() {
 }
 
 // Composant pour charger le terrain
-function Terrain({ onTerrainLoaded }: { onTerrainLoaded: (mesh: THREE.Mesh, scale: THREE.Vector3, geometrySize: THREE.Vector3) => void }) {
+function Terrain({ onTerrainLoaded }: { onTerrainLoaded: (data: { terrainMesh: THREE.Mesh; densityTexture: THREE.Texture | null; scale: THREE.Vector3; geometrySize: THREE.Vector3 }) => void }) {
   const { scene } = useGLTF('/island.glb')
   const hasLoaded = useRef(false)
   
@@ -21,49 +21,68 @@ function Terrain({ onTerrainLoaded }: { onTerrainLoaded: (mesh: THREE.Mesh, scal
     if (hasLoaded.current) return
     hasLoaded.current = true
     
+    let terrainMesh: THREE.Mesh | null = null
+    let densityTexture: THREE.Texture | null = null
+    
     scene.traverse((child) => {
       if (child instanceof THREE.Mesh) {
-        child.scale.set(5,5,5)
-        
-        // Garder le matériau original du GLTF au lieu de le remplacer
-        if (child.material) {
-          console.log('Using original terrain material:', child.material)
-          // Le mesh recevra les ombres, pas le matériau
-        } else {
-          // Fallback si pas de matériau
-          child.material = new THREE.MeshPhongMaterial({ 
-            color: '#5e875e',
-            shininess: 30
-          })
+        // Identifier les meshes par leur nom
+        if (child.name === 'terrain') {
+          console.log('Found terrain mesh:', child.name)
+          terrainMesh = child as THREE.Mesh
+          
+          // Garder le matériau original du GLTF
+          if (!child.material) {
+            child.material = new THREE.MeshPhongMaterial({ 
+              color: '#5e875e',
+              shininess: 30
+            })
+          }
+          
+          child.receiveShadow = true
+          child.scale.set(5, 5, 5)
+          console.log('Terrain loaded:', child)
         }
         
-        child.receiveShadow = true
-        console.log('Terrain loaded:', child)
-        
-        // Pass both mesh, its scale, and geometry size
-        const terrainScale = new THREE.Vector3()
-        child.getWorldScale(terrainScale)
-        
-        // Calculate geometry size (bounding box)
-        const geometrySize = new THREE.Vector3()
-        child.geometry.computeBoundingBox()
-        child.geometry.boundingBox?.getSize(geometrySize)
-        
-        // Get world position (center of terrain)
-        const worldPosition = new THREE.Vector3()
-        child.getWorldPosition(worldPosition)
-        
-        console.log('Terrain world position:', worldPosition)
-        console.log('Terrain world bounds:', {
-          minX: worldPosition.x - geometrySize.x * child.scale.x / 2,
-          maxX: worldPosition.x + geometrySize.x * child.scale.x / 2,
-          minZ: worldPosition.z - geometrySize.z * child.scale.z / 2,
-          maxZ: worldPosition.z + geometrySize.z * child.scale.z / 2
-        })
-        
-        onTerrainLoaded(child, terrainScale, geometrySize)
+        if (child.name === 'texture_holder') {
+          console.log('Found texture_holder mesh:', child.name)
+          // Extraire la texture du texture_holder
+          if (child.material && child.material.map) {
+            densityTexture = child.material.map
+            console.log('Found density texture:', densityTexture?.name || densityTexture?.uuid)
+          }
+        }
       }
     })
+    
+    // Passer les données au callback
+    if (terrainMesh) {
+      const mesh = terrainMesh as THREE.Mesh
+      const terrainScale = new THREE.Vector3()
+      mesh.getWorldScale(terrainScale)
+      
+      const geometrySize = new THREE.Vector3()
+      mesh.geometry.computeBoundingBox()
+      mesh.geometry.boundingBox?.getSize(geometrySize)
+      
+      const worldPosition = new THREE.Vector3()
+      mesh.getWorldPosition(worldPosition)
+      
+      console.log('Terrain world position:', worldPosition)
+      console.log('Terrain world bounds:', {
+        minX: worldPosition.x - geometrySize.x * mesh.scale.x / 2,
+        maxX: worldPosition.x + geometrySize.x * mesh.scale.x / 2,
+        minZ: worldPosition.z - geometrySize.z * mesh.scale.z / 2,
+        maxZ: worldPosition.z + geometrySize.z * mesh.scale.z / 2
+      })
+      
+      onTerrainLoaded({
+        terrainMesh,
+        densityTexture,
+        scale: terrainScale,
+        geometrySize
+      })
+    }
   }, [scene, onTerrainLoaded])
 
   return <primitive object={scene} />
@@ -210,7 +229,7 @@ function ControlPanel({
 }
 
 export default function App() {
-  const [terrainData, setTerrainData] = useState<{ mesh: THREE.Mesh; scale: THREE.Vector3; geometrySize: THREE.Vector3 } | null>(null)
+  const [terrainData, setTerrainData] = useState<{ terrainMesh: THREE.Mesh; densityTexture: THREE.Texture | null; scale: THREE.Vector3; geometrySize: THREE.Vector3 } | null>(null)
   const [showSecondGrass, setShowSecondGrass] = useState(false)
   const [grassProps, setGrassProps] = useState({
     baseColor: '#a8ff1d',
@@ -218,16 +237,20 @@ export default function App() {
     tipColor2: '#1f352a',
     windStrength: 0.1,
     enableShadows: true,
-    scale: 1, // Scale factor for grass instances
-    count: 300,
+    scale: 1,
+    count: 8000,
     useTextureDensity: false,
     greenThreshold: 0.3,
     densityMultiplier: 1.0,
-    showDebugTerrain: false
+    showDebugTerrain: false,
+    flipTextureX: false,
+    flipTextureZ: false,
+    textureOffsetX: 0,
+    textureOffsetZ: 0
   })
 
-  const handleTerrainLoaded = (mesh: THREE.Mesh, scale: THREE.Vector3, geometrySize: THREE.Vector3) => {
-    setTerrainData({ mesh, scale, geometrySize })
+const handleTerrainLoaded = (data: { terrainMesh: THREE.Mesh; densityTexture: THREE.Texture | null; scale: THREE.Vector3; geometrySize: THREE.Vector3 }) => {
+    setTerrainData(data)
   }
 
   return (
@@ -292,7 +315,8 @@ export default function App() {
             <>
               {/* Premier patch d'herbe - version avec densité basée sur texture */}
               <Grass
-                terrainMesh={terrainData.mesh}
+                terrainMesh={terrainData.terrainMesh}
+                densityTexture={terrainData.densityTexture ?? undefined}
                 terrainScale={terrainData.scale}
                 terrainSize={terrainData.geometrySize}
                 position={[0, 0, 0]}
@@ -312,12 +336,16 @@ export default function App() {
                 greenThreshold={grassProps.greenThreshold}
                 densityMultiplier={grassProps.densityMultiplier}
                 showDebugTerrain={grassProps.showDebugTerrain}
+                flipTextureX={grassProps.flipTextureX}
+                flipTextureZ={grassProps.flipTextureZ}
+                textureOffsetX={grassProps.textureOffsetX}
+                textureOffsetZ={grassProps.textureOffsetZ}
               />
               
               {/* Deuxième patch d'herbe - version avec couleurs différentes */}
               {showSecondGrass && (
                 <Grass
-                  terrainMesh={terrainData.mesh}
+                  terrainMesh={terrainData.terrainMesh}
                   terrainScale={terrainData.scale}
                   position={[15, 0, -10]}
                   scale={grassProps.scale * 0.8}

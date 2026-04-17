@@ -24,18 +24,21 @@ const textureAnalysisCache = new Map<string, ImageData>()
  * This allows grass to grow more densely in greener areas of the terrain texture
  * 
  * @param terrainMesh - The terrain mesh whose texture we want to analyze
+ * @param densityTexture - Optional external texture to use for density (e.g., from texture_holder)
  * @returns ImageData with pixel data or null if analysis fails
  */
-function analyzeTerrainTexture(terrainMesh: THREE.Mesh): ImageData | null {
-  if (!terrainMesh.material) return null
+function analyzeTerrainTexture(terrainMesh: THREE.Mesh, densityTexture?: THREE.Texture | null): ImageData | null {
+  // Use densityTexture if provided, otherwise fall back to terrain mesh material
+  let texture: THREE.Texture | null = densityTexture || null
   
-  let texture: THREE.Texture | null = null
-  
-  // Check if material supports texture mapping
-  if (terrainMesh.material instanceof THREE.MeshStandardMaterial || 
-      terrainMesh.material instanceof THREE.MeshPhongMaterial ||
-      terrainMesh.material instanceof THREE.MeshLambertMaterial) {
-    texture = terrainMesh.material.map
+  // If no density texture provided, try to get from terrain mesh material
+  if (!texture && terrainMesh.material) {
+    // Check if material supports texture mapping
+    if (terrainMesh.material instanceof THREE.MeshStandardMaterial || 
+        terrainMesh.material instanceof THREE.MeshPhongMaterial ||
+        terrainMesh.material instanceof THREE.MeshLambertMaterial) {
+      texture = terrainMesh.material.map
+    }
   }
   
   if (!texture || !texture.image) return null
@@ -95,6 +98,7 @@ export interface GrassProps {
   terrainMesh: THREE.Mesh           // The terrain mesh to place grass on
   terrainScale?: THREE.Vector3      // The scale of the terrain mesh
   terrainSize?: THREE.Vector3      // The geometry size (bounding box) of the terrain
+  densityTexture?: THREE.Texture   // Texture to use for density-based grass placement
   position?: [number, number, number] // Position in 3D space
   scale?: number                     // Overall scale of grass instances
   count?: number                     // Maximum number of grass instances
@@ -112,6 +116,10 @@ export interface GrassProps {
   greenThreshold?: number            // Minimum green value for placement
   densityMultiplier?: number         // Multiplier for texture-based density
   showDebugTerrain?: boolean         // Show debug terrain wireframe
+  flipTextureX?: boolean            // Flip texture X axis for density mapping
+  flipTextureZ?: boolean             // Flip texture Z axis for density mapping
+  textureOffsetX?: number            // Offset X for texture UV alignment
+  textureOffsetZ?: number            // Offset Z for texture UV alignment
 }
 
 // Uniforms type - data passed to shaders
@@ -150,7 +158,8 @@ export function Grass({
   useTextureDensity = false,
   greenThreshold = 0.3,
   densityMultiplier = 2.0,
-  showDebugTerrain = false
+  showDebugTerrain = false,
+  densityTexture
 }: GrassProps) {
   // Refs for accessing mesh and geometry
   const instancedMeshRef = useRef<THREE.InstancedMesh>(null)
@@ -287,7 +296,7 @@ export function Grass({
     // This allows grass to grow more densely in greener (more suitable) areas
     let textureData: ImageData | null = null
     if (useTextureDensity) {
-      textureData = analyzeTerrainTexture(terrainMesh)
+      textureData = analyzeTerrainTexture(terrainMesh, densityTexture)
       console.log('Texture analysis:', textureData ? 'Success' : 'Failed')
     }
 
