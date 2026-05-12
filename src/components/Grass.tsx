@@ -72,13 +72,40 @@ function analyzeTerrainTexture(terrainMesh: THREE.Mesh, densityTexture?: THREE.T
   return imageData
 }
 
-// Calculate grayscale intensity at UV coordinates
+// Calculate grayscale intensity at UV coordinates with optional flipping and offset
 // Used for texture-based density: black = no grass, white = max grass
 // Higher value = more grass probability
-function getTextureIntensity(imageData: ImageData, u: number, v: number): number {
+function getTextureIntensity(
+  imageData: ImageData, 
+  u: number, 
+  v: number, 
+  flipTextureX: boolean, 
+  flipTextureZ: boolean, 
+  textureOffsetX: number, 
+  textureOffsetZ: number
+): number {
+  // Apply texture flipping if enabled
+  let finalU = u
+  let finalV = v
+  
+  if (flipTextureX) {
+    finalU = 1 - finalU
+  }
+  if (flipTextureZ) {
+    finalV = 1 - finalV
+  }
+  
+  // Apply texture offset (range -0.5 to 0.5)
+  finalU += textureOffsetX
+  finalV += textureOffsetZ
+  
+  // Wrap coordinates to 0-1 range
+  finalU = (finalU + 1) % 1
+  finalV = (finalV + 1) % 1
+  
   // Convert UV coordinates (0-1 range) to pixel coordinates
-  const x = Math.floor(u * imageData.width)
-  const y = Math.floor((1 - v) * imageData.height) // Flip Y because image coordinates differ from UV
+  const x = Math.floor(finalU * imageData.width)
+  const y = Math.floor((1 - finalV) * imageData.height) // Flip Y because image coordinates differ from UV
   const index = (y * imageData.width + x) * 4 // RGBA has 4 values per pixel
   
   if (index >= imageData.data.length) return 0
@@ -120,6 +147,8 @@ export interface GrassProps {
   flipTextureZ?: boolean             // Flip texture Z axis for density mapping
   textureOffsetX?: number            // Offset X for texture UV alignment
   textureOffsetZ?: number            // Offset Z for texture UV alignment
+  flipGrassTextureX?: boolean        // Flip grass texture X axis (UVs)
+  flipGrassTextureY?: boolean        // Flip grass texture Y axis (UVs)
 }
 
 // Uniforms type - data passed to shaders
@@ -159,6 +188,12 @@ export function Grass({
   greenThreshold = 0.3,
   densityMultiplier = 2.0,
   showDebugTerrain = false,
+  flipTextureX = false,
+  flipTextureZ = false,
+  textureOffsetX = 0,
+  textureOffsetZ = 0,
+  flipGrassTextureX = true,
+  flipGrassTextureY = false,
   densityTexture
 }: GrassProps) {
   // Refs for accessing mesh and geometry
@@ -191,7 +226,13 @@ export function Grass({
   useEffect(() => {
     noiseTexture.wrapS = noiseTexture.wrapT = THREE.RepeatWrapping
     uniformsRef.current.noiseTexture.value = noiseTexture
-    uniformsRef.current.grassAlphaTexture.value = grassAlphaTexture
+    
+    // Configure grass alpha texture properties
+    if (grassAlphaTexture) {
+      grassAlphaTexture.wrapS = grassAlphaTexture.wrapT = THREE.RepeatWrapping
+      grassAlphaTexture.flipY = false // UVs are flipped directly in geometry
+      uniformsRef.current.grassAlphaTexture.value = grassAlphaTexture
+    }
   }, [noiseTexture, grassAlphaTexture])
 
   // Load grass model from GLTF asset
@@ -205,6 +246,24 @@ export function Grass({
         console.log('Found grass mesh:', child.name)
         const geometry = child.geometry.clone()
         geometry.scale(1,1,1) // Scale up the grass geometry
+        
+        // Fix UV coordinates based on flip settings
+        const uvAttribute = geometry.getAttribute('uv')
+        if (uvAttribute) {
+          const uvArray = uvAttribute.array as Float32Array
+          for (let i = 0; i < uvArray.length; i += 2) {
+            // Conditionally flip U coordinate (index i)
+            if (flipGrassTextureX) {
+              uvArray[i] = 1 - uvArray[i]
+            }
+            // Conditionally flip V coordinate (index i+1)
+            if (flipGrassTextureY) {
+              uvArray[i + 1] = 1 - uvArray[i + 1]
+            }
+          }
+          uvAttribute.needsUpdate = true
+        }
+        
         grassGeometryRef.current = geometry
         foundGeometry = true
       }
@@ -217,16 +276,17 @@ export function Grass({
       fallbackGeometry.translate(0, 0.5, 0) // Position at center
       grassGeometryRef.current = fallbackGeometry
     }
-  }, [grassScene])
+  }, [grassScene, flipGrassTextureX, flipGrassTextureY])
 
   // Create custom shader material for grass
   const grassMaterial = useMemo(() => {
     // Use MeshLambertMaterial for good balance of performance and lighting
     const material = new THREE.MeshLambertMaterial({
       side: THREE.DoubleSide,      // Render both sides of geometry
-      transparent: false,            // Enable transparency
-      alphaTest: 0.1,              // Discard transparent pixels
-      color: baseColor             // Base color
+      transparent: true,           // Enable transparency for alpha testing
+      alphaTest: 0.1,              // Discard pixels with alpha < 0.1 (low threshold for luminance-based alpha)
+      color: baseColor,            // Base color
+      map: grassAlphaTexture       // Use grass texture as diffuse and alpha map
     })
 
     // Modify shader before compilation to add custom uniforms and behaviors
@@ -242,30 +302,67 @@ export function Grass({
         '#include <common>',
         `#include <common>
         uniform float uTime;
-        uniform float uWindStrength;`
+        uniform float uWindSpeed;
+        uniform float uWindStrength;
+        uniform sampler2D grassAlphaTexture;`
       )
 
       // Add wind animation effect to vertex shader
-      // Wind affects X position based on time, position, and UV coordinate
+      // Realistic grass wind: pivot at base, bend towards top
       shader.vertexShader = shader.vertexShader.replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
         
-        // Calculate wind effect: stronger at top of grass (UV.y near 0)
-        float windEffect = sin(uTime + position.x * 0.1 + position.z * 0.1) * uWindStrength * (1.0 - uv.y);
-        transformed.x += windEffect;`
+        // Calculate height factor for wind effect
+        // heightFactor: 0 = base of grass (no movement), 1 = top of grass (max movement)
+        // UV mapping: typically UV.y = 1 at base, UV.y = 0 at top
+        float heightFactor = 1.0 - uv.y;
+        
+        // Apply progressive bending with quadratic curve for more realistic motion
+        float bendAmount = heightFactor * heightFactor;
+        
+        // Multi-layered wind with different frequencies for natural movement
+        float primaryWind = sin(uTime * uWindSpeed + position.x * 0.1 + position.z * 0.1);
+        float secondaryWind = sin(uTime * uWindSpeed * 1.7 + position.x * 0.05 + position.z * 0.13) * 0.3;
+        float windNoise = sin(uTime * uWindSpeed * 0.5 + position.x * 0.03 + position.z * 0.07) * 0.2;
+        
+        float totalWind = (primaryWind + secondaryWind + windNoise) * uWindStrength * bendAmount;
+        
+        // Apply wind effect only to X and Z (horizontal bending)
+        transformed.x += totalWind;
+        transformed.z += totalWind * 0.3; // Less Z movement for more natural look`
       )
 
-      // Keep original fragment shader behavior
+      // Modify fragment shader to use grass alpha texture
       shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <color_fragment>',
-        `#include <color_fragment>
-        // Keep base material color`
+        '#include <common>',
+        `#include <common>
+        uniform sampler2D grassAlphaTexture;`
+      )
+
+      // Apply grass texture and alpha test in fragment shader
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <map_fragment>',
+        `#ifdef USE_MAP
+          vec4 grassTexColor = texture2D(grassAlphaTexture, vMapUv);
+        #else
+          vec4 grassTexColor = texture2D(grassAlphaTexture, vUv);
+        #endif
+        
+        // Calculate luminance of the texture (black = transparent, white = opaque)
+        float luminance = dot(grassTexColor.rgb, vec3(0.299, 0.587, 0.114));
+        
+        // Use luminance as alpha - black areas become transparent
+        diffuseColor.rgb *= grassTexColor.rgb;
+        diffuseColor.a = luminance;
+        
+        // Early discard for very dark pixels (optimization)
+        if (luminance < 0.1) discard;`
       )
     }
 
     return material
-  }, [baseColor]) // Recreate when baseColor changes
+  }, [baseColor, grassAlphaTexture]) // Recreate when baseColor or grass texture changes
 
   // Update uniforms when props change
   useEffect(() => {
@@ -278,7 +375,17 @@ export function Grass({
     uniformsRef.current.uGrassLightIntensity.value = lightIntensity
     uniformsRef.current.uWindSpeed.value = windSpeed
     uniformsRef.current.uWindStrength.value = windStrength
-  }, [baseColor, tipColor1, tipColor2, enableShadows, noiseScale, shadowDarkness, lightIntensity, windSpeed, windStrength])
+    
+    // Always ensure alpha texture is set if available
+    if (grassAlphaTexture) {
+      uniformsRef.current.grassAlphaTexture.value = grassAlphaTexture
+      // Also update the material's map property
+      if (grassMaterial && grassMaterial.map !== grassAlphaTexture) {
+        grassMaterial.map = grassAlphaTexture
+        grassMaterial.needsUpdate = true
+      }
+    }
+  }, [baseColor, tipColor1, tipColor2, enableShadows, noiseScale, shadowDarkness, lightIntensity, windSpeed, windStrength, grassAlphaTexture, grassMaterial])
 
   // Create InstancedMesh with sampling on terrain surface
   const [instancedMesh, setInstancedMesh] = useState<THREE.InstancedMesh | null>(null)
@@ -349,8 +456,8 @@ export function Grass({
         
         const v = 1 - vRaw
 
-        // Get grayscale intensity from texture at this position
-        greenIntensity = getTextureIntensity(textureData, u, v)
+        // Get grayscale intensity from texture at this position with flipping/offset
+        greenIntensity = getTextureIntensity(textureData, u, v, flipTextureX, flipTextureZ, textureOffsetX, textureOffsetZ)
         
         // Calculate probability of placing grass based on grayscale intensity
         // White (1.0) = max probability, black (0.0) = no grass
@@ -439,7 +546,7 @@ export function Grass({
     return () => {
       mesh.dispose()
     }
-  }, [terrainMesh, grassMaterial, count, scale, grassGeometryRef.current, useTextureDensity, greenThreshold, densityMultiplier, terrainScale?.x])
+  }, [terrainMesh, grassMaterial, count, scale, grassGeometryRef.current, useTextureDensity, greenThreshold, densityMultiplier, densityTexture, terrainScale, flipTextureX, flipTextureZ, textureOffsetX, textureOffsetZ])
 
   // Animation frame update
   useFrame((state) => {

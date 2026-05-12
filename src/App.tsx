@@ -28,7 +28,6 @@ function Terrain({ onTerrainLoaded }: { onTerrainLoaded: (data: { terrainMesh: T
       if (child instanceof THREE.Mesh) {
         // Identifier les meshes par leur nom
         if (child.name === 'terrain') {
-          console.log('Found terrain mesh:', child.name)
           terrainMesh = child as THREE.Mesh
           
           // Garder le matériau original du GLTF
@@ -41,15 +40,12 @@ function Terrain({ onTerrainLoaded }: { onTerrainLoaded: (data: { terrainMesh: T
           
           child.receiveShadow = true
           child.scale.set(5, 5, 5)
-          console.log('Terrain loaded:', child)
         }
         
         if (child.name === 'texture_holder') {
-          console.log('Found texture_holder mesh:', child.name)
           // Extraire la texture du texture_holder
           if (child.material && child.material.map) {
             densityTexture = child.material.map
-            console.log('Found density texture:', densityTexture?.name || densityTexture?.uuid)
           }
         }
       }
@@ -67,14 +63,6 @@ function Terrain({ onTerrainLoaded }: { onTerrainLoaded: (data: { terrainMesh: T
       
       const worldPosition = new THREE.Vector3()
       mesh.getWorldPosition(worldPosition)
-      
-      console.log('Terrain world position:', worldPosition)
-      console.log('Terrain world bounds:', {
-        minX: worldPosition.x - geometrySize.x * mesh.scale.x / 2,
-        maxX: worldPosition.x + geometrySize.x * mesh.scale.x / 2,
-        minZ: worldPosition.z - geometrySize.z * mesh.scale.z / 2,
-        maxZ: worldPosition.z + geometrySize.z * mesh.scale.z / 2
-      })
       
       onTerrainLoaded({
         terrainMesh,
@@ -215,6 +203,24 @@ function ControlPanel({
           Show Debug Terrain (Red Wireframe)
         </label>
         
+        <label style={{ display: 'block', marginBottom: '15px' }}>
+          <input 
+            type="checkbox"
+            checked={grassProps.flipGrassTextureX}
+            onChange={(e) => setGrassProps({...grassProps, flipGrassTextureX: e.target.checked})}
+          />
+          Flip Grass Texture X
+        </label>
+        
+        <label style={{ display: 'block', marginBottom: '15px' }}>
+          <input 
+            type="checkbox"
+            checked={grassProps.flipGrassTextureY}
+            onChange={(e) => setGrassProps({...grassProps, flipGrassTextureY: e.target.checked})}
+          />
+          Flip Grass Texture Y
+        </label>
+        
         <div style={{ marginTop: '15px', fontSize: '0.9em', color: '#aaa' }}>
           <strong>Controls:</strong>
           <ul style={{ marginTop: '5px', paddingLeft: '20px' }}>
@@ -246,7 +252,9 @@ export default function App() {
     flipTextureX: false,
     flipTextureZ: false,
     textureOffsetX: 0,
-    textureOffsetZ: 0
+    textureOffsetZ: 0,
+    flipGrassTextureX: true,
+    flipGrassTextureY: true
   })
 
 const handleTerrainLoaded = (data: { terrainMesh: THREE.Mesh; densityTexture: THREE.Texture | null; scale: THREE.Vector3; geometrySize: THREE.Vector3 }) => {
@@ -340,6 +348,8 @@ const handleTerrainLoaded = (data: { terrainMesh: THREE.Mesh; densityTexture: TH
                 flipTextureZ={grassProps.flipTextureZ}
                 textureOffsetX={grassProps.textureOffsetX}
                 textureOffsetZ={grassProps.textureOffsetZ}
+                flipGrassTextureX={grassProps.flipGrassTextureX}
+                flipGrassTextureY={grassProps.flipGrassTextureY}
               />
               
               {/* Deuxième patch d'herbe - version avec couleurs différentes */}
